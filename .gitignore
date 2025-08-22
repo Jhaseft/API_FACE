@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+venv/
+
+# Videos temporales
+videos/
+temp/
+
+# Otros
+.DS_Store
