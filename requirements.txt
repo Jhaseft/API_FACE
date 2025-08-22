@@ -11,3 +11,5 @@ ffmpeg-python==0.1.18
 torch==2.3.1
 torchaudio==2.3.1
 whisper==1.1.10
+tensorflow-cpu==2.13.0
+deepface==0.0.89

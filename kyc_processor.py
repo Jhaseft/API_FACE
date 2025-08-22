@@ -3,8 +3,12 @@
 # Procesamiento de frames y audio para KYC (con transcripción)
 # Autor: Jhaseft Saat (mejorado para Windows)
 # ---------------------------------------------------------
-
 import os
+
+# ⚡ Forzar uso de CPU y evitar errores de CUDA/cuDNN/cuBLAS
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # no usar GPU
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # solo errores críticos de TF
+os.environ["TF_USE_LEGACY_KERAS"] = "0"    # evita usar legacy tf.keras
 import cv2
 import numpy as np
 import tempfile
