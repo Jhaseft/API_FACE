@@ -56,6 +56,10 @@ def extract_frames_from_video(video_path, max_frames=30, frame_skip=5):
         raise RuntimeError("No se pudieron extraer frames del video")
     return frames
 
+@app.get("/")
+async def root():
+    return {"message": "KYC Processor API está corriendo"}
+
 @app.post("/registro-face/verify")
 async def verify_kyc(
     carnet: UploadFile = File(...),
