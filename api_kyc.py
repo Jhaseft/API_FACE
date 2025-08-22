@@ -25,17 +25,14 @@ def save_upload_file(upload_file: UploadFile, destination: str):
 def convert_video_to_mp4(video_path: str):
     mp4_path = os.path.join(TMP_DIR, "temp_video.mp4")
     ffmpeg_bin = "ffmpeg"
-    try:
-        subprocess.run([
-            ffmpeg_bin, "-y", "-i", video_path,
-            "-c:v", "libx264", "-preset", "fast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            mp4_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return mp4_path
-    except Exception as e:
-        raise RuntimeError(f"Error convirtiendo video a MP4: {e}")
+    subprocess.run([
+        ffmpeg_bin, "-y", "-i", video_path,
+        "-c:v", "libx264", "-preset", "fast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        mp4_path
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return mp4_path
 
 def extract_frames_from_video(video_path, max_frames=30, frame_skip=5):
     cap = cv2.VideoCapture(video_path)
@@ -64,18 +61,18 @@ async def root():
 async def verify_kyc(
     carnet: UploadFile = File(...),
     video: UploadFile = File(...),
-    audio: UploadFile = File(None)
 ):
     try:
+        # Guardar archivos
         carnet_path = save_upload_file(carnet, os.path.join(TMP_DIR, carnet.filename))
         video_path  = save_upload_file(video, os.path.join(TMP_DIR, video.filename))
-        audio_path  = None
-        if audio:
-            audio_path = save_upload_file(audio, os.path.join(TMP_DIR, audio.filename))
 
+        # Convertir video y extraer frames
         video_mp4_path = convert_video_to_mp4(video_path)
         frames = extract_frames_from_video(video_mp4_path)
-        resultado = procesar_frames(frames, carnet_path, video_path=video_mp4_path, audio_wav_path=audio_path)
+
+        # Procesar frames (sin Whisper)
+        resultado = procesar_frames(frames, carnet_path, video_path=video_mp4_path, audio_wav_path=None)
 
         return JSONResponse(content=resultado)
 
