@@ -15,7 +15,7 @@ import mediapipe as mp
 # Configuración
 # =========================
 SIMILARITY_REQUIRED = 65.0
-REQUIRE_MIN_FACE_FRAMES_RATIO = 0.30
+REQUIRE_MIN_FACE_FRAMES_RATIO = 0.40   # subí el requisito (antes 0.30)
 MAX_VERIFY_FRAMES = 5
 SCORE_W_SIMILARITY = 40.0
 SCORE_W_MOVEMENT   = 30.0
@@ -37,7 +37,33 @@ LEFT_EYE_IDX  = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380]
 
 # =========================
-# Funciones utilitarias
+# Conversión de video
+# =========================
+def convert_video_to_mp4(video_path):
+    tmp_mp4 = os.path.join(tempfile.gettempdir(), "temp_video.mp4")
+    ffmpeg_bin = "ffmpeg"
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_bin, "-y", "-i", video_path,
+                "-c:v", "libx264", "-preset", "ultrafast",  # más liviano
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                tmp_mp4
+            ],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print("[FFMPEG ERROR]", result.stderr)
+            return video_path  # fallback: devolvemos el .webm
+        return tmp_mp4
+    except Exception as e:
+        print(f"[ERROR] convert_video_to_mp4: {e}")
+        return video_path
+
+# =========================
+# Audio
 # =========================
 def check_audio_presence(video_path, aggressiveness=2):
     tmp_audio = os.path.join(tempfile.gettempdir(), "temp_audio.wav")
@@ -75,25 +101,35 @@ def check_audio_presence(video_path, aggressiveness=2):
         audio_msg = "Error leyendo audio"
     return audio_ok, audio_msg
 
+# =========================
+# Utilitarias de rostro
+# =========================
 def _rect_from_detection(det, w, h, pad=0.20):
     bb = det.location_data.relative_bounding_box
     x1 = max(int((bb.xmin - pad) * w), 0)
     y1 = max(int((bb.ymin - pad) * h), 0)
     x2 = min(int((bb.xmin + bb.width + pad) * w), w)
     y2 = min(int((bb.ymin + bb.height + pad) * h), h)
-    if x2 <= x1 or y2 <= y1: return None
+    if x2 <= x1 or y2 <= y1: 
+        return None
     return x1, y1, x2, y2
 
 def _crop_face(frame_bgr, detector):
     h, w = frame_bgr.shape[:2]
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     res = detector.process(rgb)
-    if not res.detections: return None, None
+    if not res.detections: 
+        return None, None
     det = max(res.detections, key=lambda d: d.score[0] if d.score else 0.0)
+    if det.score[0] < 0.7:   # filtro más estricto
+        return None, None
     rect = _rect_from_detection(det, w, h, pad=0.20)
-    if rect is None: return None, None
+    if rect is None: 
+        return None, None
     x1, y1, x2, y2 = rect
     crop = frame_bgr[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None, None
     cx, cy = (x1 + x2)/2.0, (y1 + y2)/2.0
     return crop, (cx, cy)
 
@@ -149,9 +185,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
         resultado["problemas"].append("No se recibieron frames.")
         return resultado
 
-    # =====================
-    # Audio
-    # =====================
+    # ===================== Audio =====================
     if audio_check and video_path:
         audio_ok, audio_msg = check_audio_presence(video_path)
     else:
@@ -160,15 +194,11 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     resultado["detalles"]["audio_msg"] = audio_msg
     resultado["mensajes"].append(f"Audio: {audio_msg}")
 
-    # =====================
-    # MediaPipe
-    # =====================
-    fd = mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.5)
-    fm = mp_fm.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    # ===================== MediaPipe =====================
+    fd = mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.7)
+    fm = mp_fm.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.6, min_tracking_confidence=0.6)
 
-    # =====================
-    # Preparar imagen del carnet
-    # =====================
+    # ===================== Imagen del carnet =====================
     carnet_img = cv2.imread(carnet_frente_path)
     if carnet_img is None:
         resultado["problemas"].append("No se pudo leer la imagen del carnet.")
@@ -182,11 +212,9 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     else:
         resultado["mensajes"].append("No se detectó rostro en imagen del carnet")
         resultado["problemas"].append("No hay rostro detectable en la imagen del carnet")
-        carnet_crop = None  # importante: no calcular similitud
+        carnet_crop = None
 
-    # =====================
-    # Procesar frames del video
-    # =====================
+    # ===================== Procesar frames del video =====================
     face_frames, centers = [], []
     face_count, blink_count, consec_blink = 0,0,0
     for f in frames:
@@ -206,7 +234,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
 
     total_frames = len(frames)
     face_ratio = face_count/total_frames if total_frames>0 else 0.0
-    resultado["rostro_detectado"] = face_ratio >= REQUIRE_MIN_FACE_FRAMES_RATIO
+    resultado["rostro_detectado"] = (face_ratio >= REQUIRE_MIN_FACE_FRAMES_RATIO and face_count >= 3)
     resultado["detalles"]["frames_con_rostro"] = face_count
     resultado["detalles"]["face_ratio"] = round(face_ratio,3)
     resultado["detalles"]["blink_count"] = blink_count
@@ -217,9 +245,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
         resultado["mensajes"].append(f"No se detectó suficiente rostro en video ({face_count}/{total_frames})")
         resultado["problemas"].append("Rostro insuficiente en video")
 
-    # =====================
-    # Similitud
-    # =====================
+    # ===================== Similitud =====================
     similitudes=[]
     if carnet_crop is not None and face_frames:
         idxs = np.linspace(0,len(face_frames)-1,num=min(MAX_VERIFY_FRAMES,len(face_frames)),dtype=int)
@@ -237,9 +263,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
         resultado["mensajes"].append("No se puede calcular similitud: rostro del carnet no detectado")
         resultado["problemas"].append("Similitud no calculada")
 
-    # =====================
-    # Movimiento (Liveness)
-    # =====================
+    # ===================== Liveness (movimiento) =====================
     liveness_score = 0.0
     if len(centers) >= 5:
         delta_x = max([c[0] for c in centers[-5:]]) - min([c[0] for c in centers[-5:]])
@@ -252,18 +276,14 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
         resultado["problemas"].append("Movimiento insuficiente para evaluar liveness")
         resultado["mensajes"].append("Movimiento insuficiente para evaluar liveness")
 
-    # =====================
-    # Parpadeo
-    # =====================
+    # ===================== Parpadeo =====================
     resultado["parpadeo_detectado"] = blink_count>=BLINK_MIN_COUNT
     if resultado["parpadeo_detectado"]:
         resultado["mensajes"].append(f"Parpadeo detectado: {blink_count} veces")
     else:
         resultado["mensajes"].append("No se detectó parpadeo suficiente")
 
-    # =====================
-    # Score
-    # =====================
+    # ===================== Score =====================
     score = 0.0
     if carnet_crop is not None and resultado["similitud_promedio"]>=SIMILARITY_REQUIRED and resultado["rostro_detectado"] and audio_ok:
         score += min(resultado["similitud_promedio"],100.0)*(SCORE_W_SIMILARITY/100.0)
