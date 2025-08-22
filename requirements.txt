@@ -1,20 +1,10 @@
 fastapi==0.112.0
 uvicorn[standard]==0.23.2
-python-multipart==0.0.6
-numpy==1.24.3
 opencv-python-headless==4.8.1.78
+python-multipart==0.0.6
 mediapipe==0.10.21
+numpy==1.24.3
+deepface==0.0.89
 soundfile==0.12.1
 webrtcvad==2.0.10
 ffmpeg-python==0.1.18
-
-# Torch CPU-only
-torch==2.3.1+cpu
-torchaudio==2.3.1+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# TensorFlow CPU
-tensorflow-cpu==2.13.0
-
-whisper==1.1.10
-deepface==0.0.89

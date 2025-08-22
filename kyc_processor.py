@@ -1,25 +1,21 @@
-# kyc_processor_transcribe.py
+# kyc_processor_light.py
 # ---------------------------------------------------------
-# Procesamiento de frames y audio para KYC (con transcripción)
-# Autor: Jhaseft Saat (mejorado para Windows)
+# Procesamiento de frames para KYC (sin transcripción)
+# Autor: Jhaseft Saat
 # ---------------------------------------------------------
 import os
-
-# ⚡ Forzar uso de CPU y evitar errores de CUDA/cuDNN/cuBLAS
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # no usar GPU
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # solo errores críticos de TF
-os.environ["TF_USE_LEGACY_KERAS"] = "0"    # evita usar legacy tf.keras
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 import cv2
 import numpy as np
 import tempfile
 import subprocess
 import wave 
-import ffmpeg
 import soundfile as sf
 import webrtcvad
 from deepface import DeepFace
 import mediapipe as mp
-import whisper
 
 # =========================
 # Configuración y umbrales
@@ -57,23 +53,19 @@ def convert_video_to_mp4(input_path):
     base, _ = os.path.splitext(input_path)
     output_path = base + "_converted.mp4"
     ffmpeg_bin = r"C:\ffmpeg\bin\ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-    try:
-        subprocess.run([
-            ffmpeg_bin,
-            "-i", input_path,
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-c:a", "aac",
-            "-y", output_path
-        ], check=True)
-        return output_path
-    except Exception as e:
-        raise RuntimeError(f"Error convirtiendo video a MP4: {e}")
+    subprocess.run([
+        ffmpeg_bin,
+        "-i", input_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-c:a", "aac",
+        "-y", output_path
+    ], check=True)
+    return output_path
 
-def extract_audio_and_check(video_path, aggressiveness=2):
+def check_audio_presence(video_path, aggressiveness=2):
     """
-    Extrae audio WAV desde cualquier video, verifica si hay voz real y lo transcribe con Whisper.
-    Compatible con Windows.
+    Extrae audio WAV desde video y verifica si hay voz real.
     """
     tmp_audio = os.path.join(tempfile.gettempdir(), "temp_audio.wav")
     ffmpeg_bin = r"C:\ffmpeg\bin\ffmpeg.exe" if os.name == "nt" else "ffmpeg"
@@ -81,20 +73,19 @@ def extract_audio_and_check(video_path, aggressiveness=2):
     # Convertir video a WAV 16kHz mono
     try:
         (
-            ffmpeg
-            .input(video_path)
-            .output(tmp_audio, format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run(cmd=ffmpeg_bin, overwrite_output=True, quiet=True)
+            subprocess.run([
+                ffmpeg_bin, "-i", video_path,
+                "-ac", "1", "-ar", "16000",
+                "-y", tmp_audio
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         )
-    except Exception as e:
-        return False, f"Error extrayendo audio: {e}", None, ""
+    except:
+        return False, "Error extrayendo audio"
 
     if not os.path.exists(tmp_audio):
-        return False, "No se creó archivo de audio", None, ""
+        return False, "No se creó archivo de audio"
 
-    # Detectar voz
-    audio_ok = False
-    audio_msg = "No se detectó voz suficiente"
+    # Detectar voz con VAD
     try:
         wf = wave.open(tmp_audio, 'rb')
         vad = webrtcvad.Vad(aggressiveness)
@@ -116,20 +107,12 @@ def extract_audio_and_check(video_path, aggressiveness=2):
         audio_ok = voice_ratio > 0.05
         audio_msg = f"Voz detectada en {voice_ratio*100:.1f}% del audio" if audio_ok else "No se detectó voz suficiente"
     except:
-        pass
+        audio_ok = False
+        audio_msg = "Error leyendo audio"
 
-    # Transcripción con Whisper
-    transcription = ""
-    if audio_ok:
-        try:
-            os.environ["FFMPEG_BINARY"] = ffmpeg_bin  # asegura que Whisper encuentre ffmpeg
-            model = whisper.load_model("small")
-            transcription = model.transcribe(os.path.abspath(tmp_audio))["text"]
-        except Exception as e:
-            transcription = f"Error transcribiendo audio: {e}"
+    return audio_ok, audio_msg
 
-    return audio_ok, audio_msg, tmp_audio, transcription
-
+# Funciones de rostro
 def _rect_from_detection(det, w, h, pad=0.20):
     bb = det.location_data.relative_bounding_box
     x1 = max(int((bb.xmin - pad) * w), 0)
@@ -168,15 +151,13 @@ def _compute_ear_from_mesh(frame_bgr, mesh):
         p1, p2, p3, p4, p5, p6 = [coords[i] for i in eye_idx]
         vertical = np.linalg.norm(np.array(p2) - np.array(p6)) + np.linalg.norm(np.array(p3) - np.array(p5))
         horizontal = np.linalg.norm(np.array(p1) - np.array(p4))
-        if horizontal == 0:
-            return None
+        if horizontal == 0: return None
         return vertical / (2.0 * horizontal)
 
     left = _ear(LEFT_EYE_IDX)
     right = _ear(RIGHT_EYE_IDX)
-    if left is None or right is None:
-        return None, False
-    return (left + right) / 2.0, True
+    if left is None or right is None: return None, False
+    return (left + right)/2.0, True
 
 def _resize_for_deepface(img_bgr, size=224):
     return cv2.resize(img_bgr, (size, size), interpolation=cv2.INTER_AREA)
@@ -192,7 +173,7 @@ def _compute_similarity_percent(img1_bgr, img2_bgr):
 # =========================
 # Función principal
 # =========================
-def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=None):
+def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=True):
     resultado = {
         "verificado": False,
         "similitud_promedio": 0.0,
@@ -202,58 +183,33 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=
         "rostro_detectado": False,
         "score": 0.0,
         "problemas": [],
-        "detalles": {
-            "frames_totales": len(frames),
-            "frames_con_rostro": 0,
-            "face_ratio": 0.0,
-            "blink_count": 0,
-            "audio_msg": "",
-            "transcription": ""
-        },
+        "detalles": {"frames_totales": len(frames), "frames_con_rostro":0, "face_ratio":0.0, "blink_count":0, "audio_msg":""},
         "mensajes": []
     }
-
     problemas = resultado["problemas"]
     if not frames:
-        problemas.append("No se recibieron frames para procesar.")
+        problemas.append("No se recibieron frames.")
         return resultado
 
     # Audio
-    if audio_wav_path is None and video_path is not None:
-        audio_ok, audio_msg, audio_wav_path, transcription = extract_audio_and_check(video_path)
-    elif audio_wav_path is not None:
-        try:
-            data, _ = sf.read(audio_wav_path)
-            if data.ndim > 1:
-                data = np.mean(data, axis=1)
-            rms = np.sqrt(np.mean(data**2))
-            audio_ok = rms > 0.0001 and np.any(data != 0)
-            audio_msg = f"Audio válido. RMS={rms:.7f}" if audio_ok else "Audio insuficiente o silencio detectado"
-            transcription = ""
-        except:
-            audio_ok = False
-            audio_msg = "Error leyendo audio"
-            transcription = ""
+    if audio_check and video_path:
+        audio_ok, audio_msg = check_audio_presence(video_path)
     else:
-        audio_ok = False
-        audio_msg = "No hay audio"
-        transcription = ""
-
+        audio_ok, audio_msg = False, "Audio no verificado"
     resultado["audio"] = audio_ok
     resultado["detalles"]["audio_msg"] = audio_msg
-    resultado["detalles"]["transcription"] = transcription
     if not audio_ok:
         problemas.append(audio_msg)
 
-    # Inicializar MediaPipe
+    # MediaPipe
     fd = mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.5)
     fm = mp_fm.FaceMesh(max_num_faces=1, refine_landmarks=True,
                         min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-    # Preparar rostro del carnet
+    # Preparar carnet
     carnet_img = cv2.imread(carnet_frente_path)
     if carnet_img is None:
-        problemas.append("No se pudo leer la imagen del carnet frente.")
+        problemas.append("No se pudo leer la imagen del carnet.")
         return resultado
     carnet_crop, _ = _crop_face_with_mediapipe_bgr(carnet_img, fd)
     carnet_crop = _resize_for_deepface(carnet_crop if carnet_crop is not None else carnet_img)
@@ -262,10 +218,9 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=
     face_frames, centers_x = [], []
     face_count, blink_count, consec_blink = 0, 0, 0
     for idx, f in enumerate(frames):
-        if idx % 2 != 0:
-            continue
+        if idx % 2 != 0: continue
         face_crop, cx = _crop_face_with_mediapipe_bgr(f, fd)
-        if face_crop is not None and face_crop.size > 0:
+        if face_crop is not None:
             face_count += 1
             centers_x.append(cx)
             face_frames.append((_resize_for_deepface(face_crop), cx))
@@ -275,18 +230,15 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=
             if ear < EYE_AR_THRESH:
                 consec_blink += 1
             else:
-                if consec_blink >= BLINK_MIN_CONSEC_FRAMES:
-                    blink_count += 1
+                if consec_blink >= BLINK_MIN_CONSEC_FRAMES: blink_count += 1
                 consec_blink = 0
-    if consec_blink >= BLINK_MIN_CONSEC_FRAMES:
-        blink_count += 1
+    if consec_blink >= BLINK_MIN_CONSEC_FRAMES: blink_count +=1
 
-    # Estadísticas
     total_frames = len(frames)
-    face_ratio = (face_count / total_frames) if total_frames > 0 else 0.0
+    face_ratio = face_count/total_frames if total_frames>0 else 0.0
     resultado["rostro_detectado"] = face_ratio >= REQUIRE_MIN_FACE_FRAMES_RATIO
     resultado["detalles"]["frames_con_rostro"] = face_count
-    resultado["detalles"]["face_ratio"] = round(face_ratio, 3)
+    resultado["detalles"]["face_ratio"] = round(face_ratio,3)
     resultado["detalles"]["blink_count"] = blink_count
     if not resultado["rostro_detectado"]:
         problemas.append(f"No se detectó rostro suficiente ({face_count}/{total_frames}).")
@@ -294,15 +246,12 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=
     # Similitud
     similitudes = []
     if face_frames:
-        idxs = np.linspace(0, len(face_frames)-1, num=min(MAX_VERIFY_FRAMES, len(face_frames)), dtype=int)
+        idxs = np.linspace(0,len(face_frames)-1,num=min(MAX_VERIFY_FRAMES,len(face_frames)),dtype=int)
         for i in idxs:
-            face_crop_i, _ = face_frames[i]
-            sim = _compute_similarity_percent(face_crop_i, carnet_crop)
-            if sim is not None:
-                similitudes.append(sim)
+            sim = _compute_similarity_percent(face_frames[i][0], carnet_crop)
+            if sim is not None: similitudes.append(sim)
     resultado["similitud_promedio"] = float(np.mean(similitudes)) if similitudes else 0.0
-    if not similitudes:
-        problemas.append("No se pudo calcular similitud.")
+    if not similitudes: problemas.append("No se pudo calcular similitud.")
 
     # Movimiento
     if len(centers_x) >= 5:
@@ -311,78 +260,18 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_wav_path=
     elif resultado["rostro_detectado"]:
         problemas.append("Movimiento insuficiente para evaluar liveness.")
 
-    # Parpadeo
     resultado["parpadeo_detectado"] = blink_count >= BLINK_MIN_COUNT
 
-    # Reglas duras y score
-    cumple_sim = resultado["similitud_promedio"] >= SIMILARITY_REQUIRED
-    cumple_rostro = resultado["rostro_detectado"]
-
+    # Score
     score = 0.0
-    if cumple_sim and cumple_rostro and audio_ok:
-        score += min(resultado["similitud_promedio"], 100.0) * (SCORE_W_SIMILARITY / 100.0)
-        score += min(resultado["liveness_movimiento"], 100.0) * (SCORE_W_MOVEMENT / 100.0)
-        if resultado["parpadeo_detectado"]:
-            score += SCORE_W_BLINK
-        if resultado["audio"]:
-            score += SCORE_W_AUDIO
+    if resultado["similitud_promedio"]>=SIMILARITY_REQUIRED and resultado["rostro_detectado"] and audio_ok:
+        score += min(resultado["similitud_promedio"],100.0)*(SCORE_W_SIMILARITY/100.0)
+        score += min(resultado["liveness_movimiento"],100.0)*(SCORE_W_MOVEMENT/100.0)
+        if resultado["parpadeo_detectado"]: score+=SCORE_W_BLINK
+        if resultado["audio"]: score+=SCORE_W_AUDIO
         resultado["verificado"] = True
-    resultado["score"] = float(min(100.0, score))
+    resultado["score"] = round(min(100.0,score),2)
     resultado["similitud_promedio"] = round(resultado["similitud_promedio"],2)
     resultado["liveness_movimiento"] = round(resultado["liveness_movimiento"],2)
-    resultado["score"] = round(resultado["score"],2)
-
-    # =========================
-    # Mensajes profesionales
-    # =========================
-    mensajes = []
-
-    # Rostro detectado suficiente
-    if not resultado["rostro_detectado"]:
-        mensajes.append(
-            "No se detectó suficiente rostro en el video. Asegúrese de que su cara esté visible y bien iluminada."
-        )
-
-    # Similitud
-    if resultado["similitud_promedio"] < SIMILARITY_REQUIRED:
-        if resultado["rostro_detectado"]:
-            mensajes.append(
-                "El video está bien, pero la imagen del carnet no coincide lo suficiente. Por favor, mejore la foto del carnet."
-            )
-        else:
-            mensajes.append(
-                "No se pudo verificar la similitud debido a la detección insuficiente del rostro."
-            )
-    else:
-        mensajes.append(f"Similitud verificada: {resultado['similitud_promedio']}% ✅")
-
-    # Movimiento (liveness)
-    if resultado["liveness_movimiento"] < 50.0:
-        mensajes.append(
-            "Se detectó poco movimiento en la cámara. Por favor, mueva ligeramente la cabeza durante la captura para verificar liveness."
-        )
-    else:
-        mensajes.append(f"Movimiento suficiente para liveness: {resultado['liveness_movimiento']}% ✅")
-
-    # Parpadeo
-    if not resultado["parpadeo_detectado"]:
-        mensajes.append("No se detectó parpadeo. Por favor, parpadee normalmente durante la captura.")
-    else:
-        mensajes.append("Parpadeo detectado correctamente ✅")
-
-    # Audio y transcripción
-    if not resultado["audio"]:
-        mensajes.append("No se detectó voz suficiente. Por favor, hable claramente durante la grabación.")
-    else:
-        mensajes.append(f"Audio verificado correctamente ✅ ({resultado['detalles']['audio_msg']})")
-        mensajes.append(f"Transcripción detectada: \"{resultado['detalles']['transcription']}\"")
-
-    # Score final
-    if resultado["verificado"]:
-        mensajes.append(f"Verificación completada con éxito. Puntaje final: {resultado['score']} ✅")
-    else:
-        mensajes.append(f"Verificación incompleta. Puntaje final: {resultado['score']} ⚠️")
-
-    resultado["mensajes"] = mensajes
 
     return resultado
