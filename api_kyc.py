@@ -72,7 +72,7 @@ async def verify_kyc(
         frames = extract_frames_from_video(video_mp4_path)
 
         # Procesar frames (sin Whisper)
-        resultado = procesar_frames(frames, carnet_path, video_path=video_mp4_path, audio_wav_path=None)
+        resultado = procesar_frames(frames, carnet_path, video_path=video_mp4_path)
 
         return JSONResponse(content=resultado)
 
