@@ -7,8 +7,14 @@ mediapipe==0.10.21
 soundfile==0.12.1
 webrtcvad==2.0.10
 ffmpeg-python==0.1.18
-torch==2.3.1
-torchaudio==2.3.1
+
+# Torch CPU-only
+torch==2.3.1+cpu
+torchaudio==2.3.1+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# TensorFlow CPU
 tensorflow-cpu==2.13.0
+
 whisper==1.1.10
 deepface==0.0.89
