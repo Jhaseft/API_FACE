@@ -11,8 +11,7 @@ import cv2
 import numpy as np
 import tempfile
 import subprocess
-import wave 
-import soundfile as sf
+import wave
 import webrtcvad
 from deepface import DeepFace
 import mediapipe as mp
@@ -52,7 +51,7 @@ RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380]
 def convert_video_to_mp4(input_path):
     base, _ = os.path.splitext(input_path)
     output_path = base + "_converted.mp4"
-    ffmpeg_bin = r"C:\ffmpeg\bin\ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    ffmpeg_bin = "ffmpeg"
     subprocess.run([
         ffmpeg_bin,
         "-i", input_path,
@@ -64,28 +63,21 @@ def convert_video_to_mp4(input_path):
     return output_path
 
 def check_audio_presence(video_path, aggressiveness=2):
-    """
-    Extrae audio WAV desde video y verifica si hay voz real.
-    """
     tmp_audio = os.path.join(tempfile.gettempdir(), "temp_audio.wav")
-    ffmpeg_bin = r"C:\ffmpeg\bin\ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    ffmpeg_bin = "ffmpeg"
 
-    # Convertir video a WAV 16kHz mono
     try:
-        (
-            subprocess.run([
-                ffmpeg_bin, "-i", video_path,
-                "-ac", "1", "-ar", "16000",
-                "-y", tmp_audio
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        )
+        subprocess.run([
+            ffmpeg_bin, "-i", video_path,
+            "-ac", "1", "-ar", "16000",
+            "-y", tmp_audio
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except:
         return False, "Error extrayendo audio"
 
     if not os.path.exists(tmp_audio):
         return False, "No se creó archivo de audio"
 
-    # Detectar voz con VAD
     try:
         wf = wave.open(tmp_audio, 'rb')
         vad = webrtcvad.Vad(aggressiveness)
@@ -186,9 +178,9 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
         "detalles": {"frames_totales": len(frames), "frames_con_rostro":0, "face_ratio":0.0, "blink_count":0, "audio_msg":""},
         "mensajes": []
     }
-    problemas = resultado["problemas"]
+
     if not frames:
-        problemas.append("No se recibieron frames.")
+        resultado["problemas"].append("No se recibieron frames.")
         return resultado
 
     # Audio
@@ -199,7 +191,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     resultado["audio"] = audio_ok
     resultado["detalles"]["audio_msg"] = audio_msg
     if not audio_ok:
-        problemas.append(audio_msg)
+        resultado["problemas"].append(audio_msg)
 
     # MediaPipe
     fd = mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.5)
@@ -209,7 +201,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     # Preparar carnet
     carnet_img = cv2.imread(carnet_frente_path)
     if carnet_img is None:
-        problemas.append("No se pudo leer la imagen del carnet.")
+        resultado["problemas"].append("No se pudo leer la imagen del carnet.")
         return resultado
     carnet_crop, _ = _crop_face_with_mediapipe_bgr(carnet_img, fd)
     carnet_crop = _resize_for_deepface(carnet_crop if carnet_crop is not None else carnet_img)
@@ -241,7 +233,7 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     resultado["detalles"]["face_ratio"] = round(face_ratio,3)
     resultado["detalles"]["blink_count"] = blink_count
     if not resultado["rostro_detectado"]:
-        problemas.append(f"No se detectó rostro suficiente ({face_count}/{total_frames}).")
+        resultado["problemas"].append(f"No se detectó rostro suficiente ({face_count}/{total_frames}).")
 
     # Similitud
     similitudes = []
@@ -251,14 +243,14 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
             sim = _compute_similarity_percent(face_frames[i][0], carnet_crop)
             if sim is not None: similitudes.append(sim)
     resultado["similitud_promedio"] = float(np.mean(similitudes)) if similitudes else 0.0
-    if not similitudes: problemas.append("No se pudo calcular similitud.")
+    if not similitudes: resultado["problemas"].append("No se pudo calcular similitud.")
 
     # Movimiento
     if len(centers_x) >= 5:
         delta = float(max(centers_x[-5:]) - min(centers_x[-5:]))
         resultado["liveness_movimiento"] = float(min(delta / MOVEMENT_THRESHOLD_PX * 100.0, 100.0))
     elif resultado["rostro_detectado"]:
-        problemas.append("Movimiento insuficiente para evaluar liveness.")
+        resultado["problemas"].append("Movimiento insuficiente para evaluar liveness.")
 
     resultado["parpadeo_detectado"] = blink_count >= BLINK_MIN_COUNT
 
