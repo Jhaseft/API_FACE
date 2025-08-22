@@ -10,4 +10,4 @@ webrtcvad==2.0.10
 ffmpeg-python==0.1.18
 torch==2.3.1
 torchaudio==2.3.1
-whisper==20230314
+whisper==1.1.10
