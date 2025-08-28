@@ -14,8 +14,8 @@ import mediapipe as mp
 # =========================
 # Configuración
 # =========================
-SIMILARITY_REQUIRED = 65.0
-REQUIRE_MIN_FACE_FRAMES_RATIO = 0.40   # subí el requisito (antes 0.30)
+SIMILARITY_REQUIRED = 50.0       # más permisivo
+REQUIRE_MIN_FACE_FRAMES_RATIO = 0.40
 MAX_VERIFY_FRAMES = 5
 SCORE_W_SIMILARITY = 40.0
 SCORE_W_MOVEMENT   = 30.0
@@ -46,7 +46,7 @@ def convert_video_to_mp4(video_path):
         result = subprocess.run(
             [
                 ffmpeg_bin, "-y", "-i", video_path,
-                "-c:v", "libx264", "-preset", "ultrafast",  # más liviano
+                "-c:v", "libx264", "-preset", "ultrafast",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 tmp_mp4
@@ -56,7 +56,7 @@ def convert_video_to_mp4(video_path):
         )
         if result.returncode != 0:
             print("[FFMPEG ERROR]", result.stderr)
-            return video_path  # fallback: devolvemos el .webm
+            return video_path
         return tmp_mp4
     except Exception as e:
         print(f"[ERROR] convert_video_to_mp4: {e}")
@@ -121,7 +121,7 @@ def _crop_face(frame_bgr, detector):
     if not res.detections: 
         return None, None
     det = max(res.detections, key=lambda d: d.score[0] if d.score else 0.0)
-    if det.score[0] < 0.7:   # filtro más estricto
+    if det.score[0] < 0.7:   # filtro estándar
         return None, None
     rect = _rect_from_detection(det, w, h, pad=0.20)
     if rect is None: 
@@ -283,14 +283,22 @@ def procesar_frames(frames, carnet_frente_path, video_path=None, audio_check=Tru
     else:
         resultado["mensajes"].append("No se detectó parpadeo suficiente")
 
-    # ===================== Score =====================
+    # ===================== Score permisivo =====================
     score = 0.0
-    if carnet_crop is not None and resultado["similitud_promedio"]>=SIMILARITY_REQUIRED and resultado["rostro_detectado"] and audio_ok:
-        score += min(resultado["similitud_promedio"],100.0)*(SCORE_W_SIMILARITY/100.0)
-        score += min(resultado["liveness_movimiento"],100.0)*(SCORE_W_MOVEMENT/100.0)
-        if resultado["parpadeo_detectado"]: score+=SCORE_W_BLINK
-        if resultado["audio"]: score+=SCORE_W_AUDIO
-        resultado["verificado"] = True
+    sim = resultado["similitud_promedio"]
+
+    if carnet_crop is not None and resultado["rostro_detectado"]:
+        sim_score = min(sim,100.0)*(SCORE_W_SIMILARITY/100.0) if sim>=SIMILARITY_REQUIRED else (sim/2)*(SCORE_W_SIMILARITY/100.0)
+        liveness_score = min(resultado["liveness_movimiento"],100.0)*(SCORE_W_MOVEMENT/100.0)
+        blink_score = SCORE_W_BLINK if resultado["parpadeo_detectado"] else 0.0
+        audio_score = SCORE_W_AUDIO if resultado["audio"] else 0.0
+
+        score = sim_score + liveness_score + blink_score + audio_score
+
+        # Verificado si cumple liveness o parpadeo y similitud >= 50%
+        if (sim >= SIMILARITY_REQUIRED or liveness_score >= 20.0 or resultado["parpadeo_detectado"]) and resultado["rostro_detectado"]:
+            resultado["verificado"] = True
+
     resultado["score"] = round(min(100.0,score),2)
 
     return resultado
