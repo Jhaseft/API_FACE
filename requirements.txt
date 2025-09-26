@@ -8,4 +8,4 @@ deepface==0.0.89
 soundfile==0.12.1
 webrtcvad==2.0.10
 ffmpeg-python==0.1.18
-tensorflow-cpu==2.14.0
+tensorflow==2.14.0
