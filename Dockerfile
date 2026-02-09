@@ -1,5 +1,5 @@
 # Imagen base con Python 3.11 slim
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
