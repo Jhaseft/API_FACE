@@ -1,5 +1,5 @@
 # Imagen base con Python 3.10 (estable para mediapipe/whisper)
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
