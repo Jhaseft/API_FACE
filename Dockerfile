@@ -1,27 +1,39 @@
-FROM python:3.11-slim
+# Imagen base con Python 3.10 (estable para mediapipe/whisper)
+FROM python:3.10-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Actualizar e instalar dependencias del sistema
+# Forzar TensorFlow a CPU y suprimir logs
+ENV CUDA_VISIBLE_DEVICES=""
+ENV TF_CPP_MIN_LOG_LEVEL=2
+ENV TMPDIR=/tmp
+
+# Dependencias del sistema necesarias
 RUN apt-get update && apt-get install -y \
     build-essential \
-    curl \
-    git \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear virtualenv
-RUN python -m venv /opt/venv
-
-# Activar virtualenv y actualizar pip/setuptools
-RUN /opt/venv/bin/pip install --upgrade pip setuptools wheel
-
-# Copiar tu código
+# Directorio de la app
 WORKDIR /app
-COPY . /app
 
-# Instalar dependencias de tu proyecto
-RUN /opt/venv/bin/pip install -r requirements.txt
+# Copiar requirements e instalar dependencias
+COPY requirements.txt .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
-# Comando por defecto
-CMD ["/opt/venv/bin/uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8080"]
+# Copiar código
+COPY . .
+
+# Exponer puerto
+EXPOSE 8080
+
+# Comando de inicio
+CMD ["uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8080"]
