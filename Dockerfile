@@ -1,10 +1,8 @@
-# Imagen base con Python 3.10 (estable para mediapipe/whisper)
+# Imagen base Python 3.10
 FROM python:3.10-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Forzar TensorFlow a CPU y suprimir logs
 ENV CUDA_VISIBLE_DEVICES=""
 ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV TMPDIR=/tmp
@@ -19,17 +17,32 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Directorio de la app
-WORKDIR /app
-
-# Copiar requirements e instalar dependencias
-COPY requirements.txt .
+# Crear y activar entorno virtual
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
 
-# Copiar código
+# Actualizar pip
+RUN pip install --upgrade pip
+
+# Copiar requirements
+COPY requirements.txt .
+
+# Instalar librerías críticas compilando desde código para evitar AVX
+RUN pip install --no-binary :all: numpy opencv-python-headless mediapipe
+# Instalar el resto de librerías normalmente
+RUN pip install fastapi==0.112.0 \
+    uvicorn[standard]==0.23.2 \
+    python-multipart==0.0.6 \
+    deepface[torch]==0.0.89 \
+    soundfile==0.12.1 \
+    webrtcvad==2.0.10 \
+    ffmpeg-python==0.1.18 \
+    tensorflow==2.15.0 \
+    keras==2.15.0 \
+    typing-extensions>=4.8.0
+
+# Directorio de la app
+WORKDIR /app
 COPY . .
 
 # Exponer puerto
