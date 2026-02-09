@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     libxext6 \
     ffmpeg \
+    libssl-dev \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear y activar entorno virtual
@@ -27,8 +29,9 @@ RUN pip install --upgrade pip
 # Copiar requirements
 COPY requirements.txt .
 
-# Instalar librerías críticas compilando desde código para evitar AVX
-RUN pip install --no-binary :all: numpy opencv-python-headless mediapipe
+# Instalar librerías principales usando wheels (sin compilar desde cero)
+RUN pip install numpy opencv-python-headless mediapipe
+
 # Instalar el resto de librerías normalmente
 RUN pip install fastapi==0.112.0 \
     uvicorn[standard]==0.23.2 \
