@@ -4,7 +4,10 @@ opencv-python-headless==4.8.1.78
 python-multipart==0.0.6
 mediapipe==0.10.21
 numpy==1.24.3
-deepface[tensorflow-cpu]==0.0.89
+deepface[torch]==0.0.89
 soundfile==0.12.1
 webrtcvad==2.0.10
 ffmpeg-python==0.1.18
+torch==2.1.1+cpu
+torchvision==0.16.1+cpu
+torchaudio==2.1.1+cpu

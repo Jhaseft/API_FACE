@@ -24,7 +24,7 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copiar requirements y asegurarse de tensorflow-cpu
+# Copiar requirements y asegurarse de PyTorch CPU
 COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
