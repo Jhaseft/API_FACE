@@ -1,4 +1,4 @@
-# Imagen base con Python 3.10 (estable para mediapipe/whisper)
+# Imagen base con Python 3.11 (estable para mediapipe/whisper)
 FROM python:3.11-slim
 
 # Evitar preguntas interactivas
@@ -19,17 +19,19 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Directorio de la app
+# Crear entorno virtual
 WORKDIR /app
-
-# Copiar requirements e instalar dependencias
-COPY requirements.txt .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
 
-# Copiar código
+# Actualizar pip y asegurar tensorflow-cpu
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip uninstall -y tensorflow tensorflow-gpu \
+    && pip install tensorflow-cpu \
+    && pip install -r requirements.txt
+
+# Copiar el código
 COPY . .
 
 # Exponer puerto
