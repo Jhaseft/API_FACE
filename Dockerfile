@@ -1,4 +1,4 @@
-# Imagen base con Python 3.12 slim
+# Imagen base con Python 3.11 slim
 FROM python:3.11-slim
 
 # Evitar preguntas interactivas
@@ -7,14 +7,18 @@ ENV TMPDIR=/tmp
 ENV CUDA_VISIBLE_DEVICES=""
 ENV TF_CPP_MIN_LOG_LEVEL=2
 
-# Dependencias del sistema
+# Dependencias del sistema necesarias para compilación y multimedia
 RUN apt-get update && apt-get install -y \
     build-essential \
+    python3-dev \
+    libffi-dev \
     libglib2.0-0 \
     libsm6 \
     libxrender1 \
     libxext6 \
     ffmpeg \
+    curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear directorio de la app
