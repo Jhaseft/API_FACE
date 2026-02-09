@@ -1,15 +1,13 @@
-# Imagen base con Python 3.11 (estable para mediapipe/whisper)
+# Imagen base con Python 3.11 slim
 FROM python:3.11-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Forzar TensorFlow a CPU y suprimir logs
+ENV TMPDIR=/tmp
 ENV CUDA_VISIBLE_DEVICES=""
 ENV TF_CPP_MIN_LOG_LEVEL=2
-ENV TMPDIR=/tmp
 
-# Dependencias del sistema necesarias
+# Dependencias del sistema
 RUN apt-get update && apt-get install -y \
     build-essential \
     libglib2.0-0 \
@@ -19,19 +17,19 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear entorno virtual
+# Crear directorio de la app
 WORKDIR /app
+
+# Crear entorno virtual
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Actualizar pip y asegurar tensorflow-cpu
+# Copiar requirements y asegurarse de tensorflow-cpu
 COPY requirements.txt .
 RUN pip install --upgrade pip \
-    && pip uninstall -y tensorflow tensorflow-gpu \
-    && pip install tensorflow-cpu \
-    && pip install -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código
+# Copiar el código de la app
 COPY . .
 
 # Exponer puerto
