@@ -1,44 +1,41 @@
-# Imagen base Python 3.10
 FROM python:3.10-slim
 
-# Evitar preguntas interactivas
+# Evitar preguntas interactivas durante la instalación
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CUDA_VISIBLE_DEVICES=""
-ENV TF_CPP_MIN_LOG_LEVEL=2
-ENV TMPDIR=/tmp
 
-# Dependencias del sistema necesarias
+# Instalar dependencias del sistema (sin AVX)
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libglib2.0-0 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
     ffmpeg \
-    libssl-dev \
-    cmake \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libglib2.0-0 \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear y activar entorno virtual
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Actualizar pip
-RUN pip install --upgrade pip
+# Crear directorio de trabajo
+WORKDIR /app
 
 # Copiar requirements
 COPY requirements.txt .
 
-# Instalar todas las librerías del requirements.txt usando wheels precompilados
+# Instalar dependencias Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Directorio de la app
-WORKDIR /app
-COPY . .
+# Copiar código de la aplicación
+COPY kyc_processor.py .
+COPY api_kyc.py .
+
+# Crear directorio para modelos
+RUN mkdir -p models
 
 # Exponer puerto
-EXPOSE 8080
+EXPOSE 8000
 
-# Comando de inicio
-CMD ["uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "debug", "--access-log"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/health')"
 
+# Comando para ejecutar la API
+CMD ["uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
