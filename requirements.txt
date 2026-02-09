@@ -8,6 +8,6 @@ deepface[torch]==0.0.89
 soundfile==0.12.1
 webrtcvad==2.0.10
 ffmpeg-python==0.1.18
-tensorflow==2.13.0
-keras==2.13.1
+tensorflow==2.15.0
+keras==2.15.0
 typing-extensions>=4.8.0
