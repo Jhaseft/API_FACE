@@ -7,6 +7,7 @@ __pycache__/
 venv/
 .venv/
 venv311
+venv3111
 # Videos temporales
 videos/
 temp/
