@@ -51,6 +51,8 @@ def download_models():
             except Exception as e:
                 print(f"✗ Error descargando {filename}: {e}")
                 raise
+        else:
+            print(f"✓ {filename} ya existe (usando cache)")
     
     return os.path.join(models_dir, FACE_PROTO), os.path.join(models_dir, FACE_MODEL)
 
