@@ -37,7 +37,7 @@ WORKDIR /app
 COPY . .
 
 # Exponer puerto
-EXPOSE 8080
+EXPOSE 8085
 
 # Comando de inicio
-CMD ["uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "api_kyc:app", "--host", "0.0.0.0", "--port", "8085"]
