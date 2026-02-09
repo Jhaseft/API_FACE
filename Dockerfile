@@ -29,20 +29,8 @@ RUN pip install --upgrade pip
 # Copiar requirements
 COPY requirements.txt .
 
-# Instalar librerías principales usando wheels (sin compilar desde cero)
-RUN pip install numpy opencv-python-headless mediapipe
-
-# Instalar el resto de librerías normalmente
-RUN pip install fastapi==0.112.0 \
-    uvicorn[standard]==0.23.2 \
-    python-multipart==0.0.6 \
-    deepface[torch]==0.0.89 \
-    soundfile==0.12.1 \
-    webrtcvad==2.0.10 \
-    ffmpeg-python==0.1.18 \
-    tensorflow==2.15.0 \
-    keras==2.15.0 \
-    typing-extensions>=4.8.0
+# Instalar todas las librerías del requirements.txt usando wheels precompilados
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Directorio de la app
 WORKDIR /app
