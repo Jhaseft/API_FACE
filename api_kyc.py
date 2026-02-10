@@ -240,7 +240,7 @@ async def verify_kyc(
             video_path=video_mp4_path,
             audio_check=True
         )
-        
+        print("Resultado del procesamiento KYC obtenido" + resultado)
         # Información adicional
         resultado["video_convertido"] = converted
         resultado["api_version"] = "2.0.0"
