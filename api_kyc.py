@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
+import numpy as np
 import os
 import tempfile
 import subprocess
@@ -42,6 +43,23 @@ def save_upload_file(upload_file: UploadFile) -> str:
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=TMP_DIR) as tmp:
         shutil.copyfileobj(upload_file.file, tmp)
         return tmp.name
+
+def normalize_for_json(obj):
+    if isinstance(obj, dict):
+        return {k: normalize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [normalize_for_json(v) for v in obj]
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, (np.integer,)):
+        return int(obj)
+    elif isinstance(obj, (np.floating,)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
+
 
 def convert_video_to_mp4(video_path: str):
     """
@@ -238,6 +256,7 @@ async def verify_kyc(
         print(f"👤 Rostro detectado: {resultado['rostro_detectado']}")
         print(f"🔊 Audio: {resultado['audio']}")
         
+        resultado = normalize_for_json(resultado)
         return JSONResponse(content=resultado)
     
     except Exception as e:
