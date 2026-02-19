@@ -1,10 +1,10 @@
-# api_kyc.py (mejorado)
+# api_kyc.py
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import shutil, os, tempfile, subprocess
 import cv2
-from kyc_processor import procesar_frames
+from kyc_processor import procesar_frames, select_best_frame, compare_faces_external
 
 app = FastAPI(title="KYC Processor API")
 
@@ -25,34 +25,32 @@ app.add_middleware(
 
 TMP_DIR = tempfile.gettempdir()
 
+# Score mínimo de liveness para considerar la prueba válida
+LIVENESS_MIN_SCORE = 35.0
+
 # =========================
 # Utilidades
 # =========================
 def save_upload_file(upload_file: UploadFile) -> str:
-    """Guarda un archivo subido en un archivo temporal y devuelve su path"""
     ext = os.path.splitext(upload_file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=TMP_DIR) as tmp:
         shutil.copyfileobj(upload_file.file, tmp)
         return tmp.name
 
+
 def convert_video_to_mp4(video_path: str):
-    """
-    Convierte un video a MP4 con H264/AAC.
-    Retorna (path_del_video, video_convertido:bool)
-    """
     mp4_path = os.path.join(TMP_DIR, "temp_video.mp4")
-    ffmpeg_bin = "ffmpeg"
     try:
         result = subprocess.run(
             [
-                ffmpeg_bin, "-y", "-i", video_path,
+                "ffmpeg", "-y", "-i", video_path,
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
-                mp4_path
+                mp4_path,
             ],
             capture_output=True,
-            text=True
+            text=True,
         )
         if result.returncode != 0:
             print("[FFMPEG ERROR]", result.stderr)
@@ -62,31 +60,26 @@ def convert_video_to_mp4(video_path: str):
         print(f"[ERROR] convert_video_to_mp4: {e}")
         return video_path, False
 
+
 def extract_frames_from_video(video_path, max_frames=30, frame_skip=5):
-    """
-    Extrae frames del video. Redimensiona para acelerar procesamiento.
-    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError("No se pudo abrir el video para extracción de frames")
-    frames = []
-    frame_count = 0
+    frames, frame_count = [], 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         if frame_count % frame_skip == 0 and len(frames) < max_frames:
-            # Redimensiona manteniendo proporción
-            h, w = frame.shape[:2]
+            h, w  = frame.shape[:2]
             scale = 320 / w if w > h else 240 / h
-            new_w, new_h = int(w*scale), int(h*scale)
-            small = cv2.resize(frame, (new_w, new_h))
-            frames.append(small)
+            frames.append(cv2.resize(frame, (int(w * scale), int(h * scale))))
         frame_count += 1
     cap.release()
     if not frames:
         raise RuntimeError("No se pudieron extraer frames del video")
     return frames
+
 
 # =========================
 # Endpoints
@@ -95,38 +88,86 @@ def extract_frames_from_video(video_path, max_frames=30, frame_skip=5):
 async def root():
     return {"message": "KYC Processor API está corriendo"}
 
+
 @app.post("/registro-face/verify")
 async def verify_kyc(
     carnet: UploadFile = File(...),
-    video: UploadFile = File(...),
+    video:  UploadFile = File(...),
 ):
+    carnet_path     = None
+    video_path      = None
+    best_frame_path = None
+
     try:
-        # Guardar archivos temporales
+        # 1. Guardar archivos subidos
         carnet_path = save_upload_file(carnet)
         video_path  = save_upload_file(video)
 
-        # Convertir video a MP4 si es posible
+        # 2. Convertir video a MP4
         video_mp4_path, converted = convert_video_to_mp4(video_path)
 
-        # Extraer frames (si falla conversión, usa original)
+        # 3. Extraer frames
         frames = extract_frames_from_video(video_mp4_path)
 
-        # Procesar KYC
-        resultado = procesar_frames(frames, carnet_path, video_path=video_mp4_path)
+        # 4. Liveness: movimiento, parpadeo, audio
+        liveness = procesar_frames(frames, video_path=video_mp4_path)
 
-        # Información de conversión
-        resultado["video_convertido"] = converted
+        # 5. Seleccionar el mejor frame del video para comparar con el carnet
+        best_frame = select_best_frame(frames)
+        face_comparison = None
+
+        if best_frame is not None:
+            # Guardar el mejor frame como imagen temporal
+            best_frame_path = os.path.join(TMP_DIR, "best_frame_kyc.jpg")
+            cv2.imwrite(best_frame_path, best_frame)
+
+            # 6. Comparar el frame con la imagen del carnet usando el servicio externo
+            face_comparison = compare_faces_external(
+                source_image_path=carnet_path,
+                target_image_path=best_frame_path,
+            )
+        else:
+            liveness["problemas"].append("No se pudo extraer un frame válido para comparación")
+            liveness["mensajes"].append("No se encontró un frame con rostro claro para comparar")
+
+        # 7. Determinar resultado final
+        liveness_ok  = liveness.get("rostro_detectado", False) and liveness.get("score", 0.0) >= LIVENESS_MIN_SCORE
+        face_match_ok = bool(face_comparison and face_comparison.get("verified", False))
+        verificado    = liveness_ok and face_match_ok
+
+        # 8. Construir respuesta
+        response = {
+            "verificado":      verificado,
+            "liveness":        liveness,
+            "comparacion_rostro": {
+                "similarity":  face_comparison.get("similarity")  if face_comparison else None,
+                "verified":    face_comparison.get("verified")     if face_comparison else None,
+                "source_face": face_comparison.get("source_face") if face_comparison else None,
+                "target_face": face_comparison.get("target_face") if face_comparison else None,
+                "error":       face_comparison.get("error")       if face_comparison else "No se pudo obtener frame válido",
+            },
+            "video_convertido": converted,
+        }
+
         if not converted:
-            resultado["mensajes"].append(
-                "⚠️ Formato de video no soportado o conversión fallida. Se usó el video original."
+            liveness["mensajes"].append(
+                "Formato de video no soportado o conversión fallida. Se usó el video original."
             )
 
-        return JSONResponse(content=resultado)
+        return JSONResponse(content=response)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return JSONResponse(
             content={"error": str(e), "mensajes": ["Ocurrió un error al procesar el KYC"]},
-            status_code=500
+            status_code=500,
         )
+    finally:
+        # Limpiar archivos temporales
+        for path in [carnet_path, video_path, best_frame_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
