@@ -4,6 +4,9 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import shutil, os, tempfile, subprocess
 import cv2
+# FIX EXIF: corrige rotación de fotos tomadas con celular (portrait/landscape)
+# Para desactivar: comentar el import y la llamada a fix_image_orientation() en verify_kyc
+from PIL import Image, ImageOps
 from kyc_processor import procesar_frames, select_best_frame, compare_faces_external
 
 app = FastAPI(title="KYC Processor API")
@@ -31,6 +34,17 @@ LIVENESS_MIN_SCORE = 35.0
 # =========================
 # Utilidades
 # =========================
+# FIX EXIF: aplica la rotación embebida en el JPEG (fotos de celular en cualquier orientación)
+# Para desactivar: comentar el cuerpo de la función y dejar solo "pass"
+def fix_image_orientation(image_path: str) -> None:
+    try:
+        img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img)  # rota los píxeles según el tag EXIF
+        img.save(image_path)
+    except Exception as e:
+        print(f"[WARN] fix_image_orientation: {e}")  # no rompe el flujo si falla
+
+
 def save_upload_file(upload_file: UploadFile) -> str:
     ext = os.path.splitext(upload_file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=TMP_DIR) as tmp:
@@ -101,6 +115,7 @@ async def verify_kyc(
     try:
         # 1. Guardar archivos subidos
         carnet_path = save_upload_file(carnet)
+        fix_image_orientation(carnet_path)  # FIX EXIF: corrige rotación antes de enviar al servicio
         video_path  = save_upload_file(video)
 
         # 2. Convertir video a MP4
