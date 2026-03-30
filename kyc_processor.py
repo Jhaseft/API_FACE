@@ -295,15 +295,39 @@ def compare_faces_external(source_image_path, target_image_path):
         params  = {"face_plugins": "landmarks,gender,age,pose"}
         headers = {"x-api-key": FACE_COMPARE_API_KEY}
 
-        with open(source_image_path, "rb") as src_f, open(target_image_path, "rb") as tgt_f:
-            resp = requests.post(
-                FACE_COMPARE_API_URL,
-                params=params,
-                headers=headers,
-                files={"source_image": src_f, "target_image": tgt_f},
-                timeout=30,
-            )
-        resp.raise_for_status()
+        def _call_api(src_path, tgt_path):
+            with open(src_path, "rb") as src_f, open(tgt_path, "rb") as tgt_f:
+                return requests.post(
+                    FACE_COMPARE_API_URL,
+                    params=params,
+                    headers=headers,
+                    files={"source_image": src_f, "target_image": tgt_f},
+                    timeout=30,
+                )
+
+        def _is_multi_face_error(r):
+            if r.ok:
+                return False
+            try:
+                return r.json().get("code") == 31
+            except Exception:
+                return False
+
+        resp = _call_api(source_image_path, target_image_path)
+
+        # Si el source (carnet) tiene múltiples rostros, invertir el orden e intentar de nuevo
+        if _is_multi_face_error(resp):
+            resp_inv = _call_api(target_image_path, source_image_path)
+            if _is_multi_face_error(resp_inv):
+                # Ambas combinaciones fallan por múltiples rostros → error definitivo
+                result["error"] = "Se detectaron múltiples rostros en el documento. El carnet debe mostrar un único rostro."
+                return result
+            # La versión invertida funcionó, usarla
+            resp = resp_inv
+
+        if not resp.ok:
+            resp.raise_for_status()
+
         data = resp.json()
         result["raw_response"] = data
 
